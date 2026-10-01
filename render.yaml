@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: demo-users-api
+    runtime: python
+    plan: free
+    branch: main
+    autoDeployTrigger: checksPass
+    buildCommand: poetry install --only main
+    startCommand: poetry run uvicorn demo_api.main:create_app --factory --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: POETRY_VERSION
+        value: 2.5.1
+      - key: API_KEYS
+        sync: false

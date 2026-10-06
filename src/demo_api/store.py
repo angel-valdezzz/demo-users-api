@@ -72,3 +72,22 @@ class UserStore:
         with self._lock:
             self.get(owner, user_id)
             del self._space(owner)[user_id]
+
+    def statistics(self, owner: str):
+        with self._lock:
+            users = list(self._space(owner).values())
+            active = sum(user.active for user in users)
+            return {
+                "total": len(users),
+                "active": active,
+                "inactive": len(users) - active,
+                "roles": {role: sum(user.role == role for user in users) for role in Role},
+            }
+
+    def set_active(self, owner: str, user_id: UUID, active: bool):
+        with self._lock:
+            user = self.get(owner, user_id)
+            if user.active == active:
+                state = "active" if active else "inactive"
+                raise HTTPException(409, f"User is already {state}")
+            return self.update(owner, user_id, UserPatch(active=active))

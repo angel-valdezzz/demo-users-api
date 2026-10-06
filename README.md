@@ -79,3 +79,13 @@ poetry run pytest -q
 ```
 
 Tests cover CRUD, isolated credentials, uniqueness, defaults, invalid bodies, authentication and OpenAPI. GitHub Actions checks the code and exports a secret-free Swagger reference. Enable **Settings → Pages → Source: GitHub Actions** once to publish it.
+
+## User lifecycle and statistics
+
+| Endpoint | Result |
+| --- | --- |
+| `GET /users/statistics` | Totals by active state and role for your credential. |
+| `POST /users/{id}/deactivate` | Deactivate an active user; 409 if already inactive. |
+| `POST /users/{id}/activate` | Reactivate an inactive user; 409 if already active. |
+
+Lifecycle endpoints return 404 for missing users, 401 for invalid credentials and 422 for invalid UUIDs. All data remains isolated per credential. Swagger includes the new schemas and response codes.

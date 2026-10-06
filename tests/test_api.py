@@ -54,3 +54,32 @@ def test_restart_restores_seed_and_missing_config_fails():
         create_app({})
     with TestClient(create_app({"local": KEY})) as client:
         assert client.get("/users", headers={"X-API-Key": KEY}).json()["total"] == 1
+
+
+def test_lifecycle_statistics_and_isolation(client):
+    initial = client.get("/users/statistics").json()
+    created = client.post(
+        "/users", json={"name": "Lifecycle", "email": "lifecycle@example.com", "role": "sales"}
+    ).json()
+    path = f"/users/{created['id']}"
+    assert client.post(path + "/activate").status_code == 409
+    assert client.post(path + "/deactivate").json()["active"] is False
+    assert client.post(path + "/deactivate").status_code == 409
+    stats = client.get("/users/statistics").json()
+    assert stats["total"] == initial["total"] + 1
+    assert stats["inactive"] == initial["inactive"] + 1
+    assert stats["roles"]["sales"] == initial["roles"]["sales"] + 1
+    assert client.post(path + "/activate", headers={"X-API-Key": OTHER}).status_code == 404
+    assert client.get("/users/statistics", headers={"X-API-Key": OTHER}).json()["total"] == 1
+    assert client.post(path + "/activate").json()["active"] is True
+    assert client.delete(path).status_code == 204
+    assert client.post(path + "/deactivate").status_code == 404
+    assert client.get("/users/statistics").json() == initial
+
+
+def test_lifecycle_auth_and_openapi(client):
+    schema = client.get("/openapi.json").json()
+    for path in ["/users/statistics", "/users/{user_id}/activate", "/users/{user_id}/deactivate"]:
+        assert path in schema["paths"]
+    assert client.get("/users/statistics", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert client.post("/users/not-a-uuid/activate").status_code == 422

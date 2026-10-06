@@ -44,3 +44,10 @@ class UserList(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class UserStatistics(BaseModel):
+    total: int
+    active: int
+    inactive: int
+    roles: dict[Role, int]

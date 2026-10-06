@@ -83,3 +83,26 @@ def test_lifecycle_auth_and_openapi(client):
         assert path in schema["paths"]
     assert client.get("/users/statistics", headers={"X-API-Key": "wrong"}).status_code == 401
     assert client.post("/users/not-a-uuid/activate").status_code == 422
+
+
+def test_openapi_contract_matches_optional_non_null_patch(client):
+    """The public contract must match omission/null behavior and error bodies."""
+    schema = client.get("/openapi.json").json()
+    models = schema["components"]["schemas"]
+    assert models["UserInput"]["required"] == ["name", "email"]
+    assert models["UserInput"]["additionalProperties"] is False
+    assert models["User"]["properties"]["id"]["format"] == "uuid"
+    assert models["UserInput"]["examples"][0]["active"] is True
+    patch = models["UserPatch"]
+    assert not patch.get("required")
+    assert patch["properties"]["active"]["type"] == "boolean"
+    assert patch["properties"]["name"]["minLength"] == 1
+    created = client.post("/users", json={"name": "Schema demo", "email": "schema@example.com"})
+    path = created.headers["Location"]
+    assert client.patch(path, json={}).json()["name"] == "Schema demo"
+    for field in ("name", "email", "role", "active"):
+        assert client.patch(path, json={field: None}).status_code == 422
+    assert "401" not in schema["paths"]["/health"]["get"]["responses"]
+    for status in ("401", "409"):
+        error = schema["paths"]["/users"]["post"]["responses"][status]
+        assert error["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")

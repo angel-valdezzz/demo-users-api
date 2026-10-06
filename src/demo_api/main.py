@@ -10,7 +10,16 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.security import APIKeyHeader
 
-from demo_api.models import Role, User, UserInput, UserList, UserPatch, UserStatistics
+from demo_api.models import (
+    ErrorResponse,
+    HealthResponse,
+    Role,
+    User,
+    UserInput,
+    UserList,
+    UserPatch,
+    UserStatistics,
+)
 from demo_api.store import UserStore
 
 
@@ -42,9 +51,9 @@ def create_app(api_keys: dict[str, str] | None = None) -> FastAPI:
             "Each key has isolated temporary data; restarts restore initial data. "
             "Use fictitious information only."
         ),
-        swagger_ui_parameters={"defaultModelsExpandDepth": -1, "displayRequestDuration": True},
-        responses={401: {"description": "Missing or invalid API key"}},
+        swagger_ui_parameters={"defaultModelsExpandDepth": 1, "displayRequestDuration": True},
     )
+    auth_errors = {401: {"model": ErrorResponse, "description": "Missing or invalid API key"}}
     store = UserStore()
     header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -57,29 +66,49 @@ def create_app(api_keys: dict[str, str] | None = None) -> FastAPI:
 
     owner_dep = Annotated[str, Depends(authenticate)]
 
-    @app.get("/health", tags=["Availability"])
+    @app.get(
+        "/health",
+        response_model=HealthResponse,
+        tags=["Availability"],
+    )
     def health():
         return {"status": "ok", "storage": "temporary"}
 
-    @app.get("/users", response_model=UserList, tags=["Users"])
+    @app.get("/users", response_model=UserList, tags=["Users"], responses=auth_errors)
     def list_users(
         owner: owner_dep,
-        role: Role | None = None,
-        active: bool | None = None,
-        limit: Annotated[int, Query(ge=1, le=100)] = 20,
-        offset: Annotated[int, Query(ge=0)] = 0,
+        role: Annotated[Role | None, Query(description="Filter by business role.")] = None,
+        active: Annotated[
+            bool | None, Query(description="Filter by active state; false selects inactive users.")
+        ] = None,
+        limit: Annotated[int, Query(ge=1, le=100, description="Page size: 1 to 100 users.")] = 20,
+        offset: Annotated[int, Query(ge=0, description="Number of matching users to skip.")] = 0,
     ):
         """List users with optional filters and pagination."""
         return store.list(owner, role, active, limit, offset)
 
-    @app.post("/users", response_model=User, status_code=201, tags=["Users"])
+    @app.post(
+        "/users",
+        response_model=User,
+        status_code=201,
+        tags=["Users"],
+        responses={
+            **auth_errors,
+            409: {"model": ErrorResponse, "description": "Email already exists"},
+        },
+    )
     def create_user(owner: owner_dep, data: UserInput, response: Response):
         """Create a user. Emails are unique within each credential's data."""
         user = store.create(owner, data)
         response.headers["Location"] = f"/users/{user.id}"
         return user
 
-    @app.get("/users/statistics", response_model=UserStatistics, tags=["Statistics"])
+    @app.get(
+        "/users/statistics",
+        response_model=UserStatistics,
+        tags=["Statistics"],
+        responses=auth_errors,
+    )
     def user_statistics(owner: owner_dep):
         """Counts by active state and role, isolated to the authenticated credential."""
         return store.statistics(owner)
@@ -89,8 +118,9 @@ def create_app(api_keys: dict[str, str] | None = None) -> FastAPI:
         response_model=User,
         tags=["User lifecycle"],
         responses={
-            404: {"description": "User not found"},
-            409: {"description": "User already active"},
+            **auth_errors,
+            404: {"model": ErrorResponse, "description": "User not found"},
+            409: {"model": ErrorResponse, "description": "User already active"},
         },
     )
     def activate_user(owner: owner_dep, user_id: UUID):
@@ -102,29 +132,58 @@ def create_app(api_keys: dict[str, str] | None = None) -> FastAPI:
         response_model=User,
         tags=["User lifecycle"],
         responses={
-            404: {"description": "User not found"},
-            409: {"description": "User already inactive"},
+            **auth_errors,
+            404: {"model": ErrorResponse, "description": "User not found"},
+            409: {"model": ErrorResponse, "description": "User already inactive"},
         },
     )
     def deactivate_user(owner: owner_dep, user_id: UUID):
         """Deactivate an active user. A repeated deactivation returns 409."""
         return store.set_active(owner, user_id, False)
 
-    @app.get("/users/{user_id}", response_model=User, tags=["Users"])
+    @app.get(
+        "/users/{user_id}",
+        response_model=User,
+        tags=["Users"],
+        responses={**auth_errors, 404: {"model": ErrorResponse, "description": "User not found"}},
+    )
     def get_user(owner: owner_dep, user_id: UUID):
         return store.get(owner, user_id)
 
-    @app.put("/users/{user_id}", response_model=User, tags=["Users"])
+    @app.put(
+        "/users/{user_id}",
+        response_model=User,
+        tags=["Users"],
+        responses={
+            **auth_errors,
+            404: {"model": ErrorResponse, "description": "User not found"},
+            409: {"model": ErrorResponse, "description": "Email already exists"},
+        },
+    )
     def replace_user(owner: owner_dep, user_id: UUID, data: UserInput):
         """Replace editable fields; omitted optional fields return to defaults."""
         return store.update(owner, user_id, data)
 
-    @app.patch("/users/{user_id}", response_model=User, tags=["Users"])
+    @app.patch(
+        "/users/{user_id}",
+        response_model=User,
+        tags=["Users"],
+        responses={
+            **auth_errors,
+            404: {"model": ErrorResponse, "description": "User not found"},
+            409: {"model": ErrorResponse, "description": "Email already exists"},
+        },
+    )
     def patch_user(owner: owner_dep, user_id: UUID, data: UserPatch):
         """Update only supplied fields. Explicit null values are rejected."""
         return store.update(owner, user_id, data)
 
-    @app.delete("/users/{user_id}", status_code=204, tags=["Users"])
+    @app.delete(
+        "/users/{user_id}",
+        status_code=204,
+        tags=["Users"],
+        responses={**auth_errors, 404: {"model": ErrorResponse, "description": "User not found"}},
+    )
     def delete_user(owner: owner_dep, user_id: UUID):
         store.delete(owner, user_id)
         return Response(status_code=204)

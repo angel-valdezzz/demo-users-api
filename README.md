@@ -89,3 +89,22 @@ Tests cover CRUD, isolated credentials, uniqueness, defaults, invalid bodies, au
 | `POST /users/{id}/activate` | Reactivate an inactive user; 409 if already active. |
 
 Lifecycle endpoints return 404 for missing users, 401 for invalid credentials and 422 for invalid UUIDs. All data remains isolated per credential. Swagger includes the new schemas and response codes.
+
+## Contrato OpenAPI y JSON Schema
+
+FastAPI genera los schemas desde los modelos Pydantic de `src/demo_api/models.py`, reutilizados en `components/schemas` de OpenAPI 3.1. Descripciones, restricciones y ejemplos se mantienen en esos modelos; no hay un JSON Schema manual duplicado.
+
+- POST/PUT requieren `name` y `email`; `role` y `active` tienen valores predeterminados. Se rechazan campos desconocidos.
+- PATCH permite omitir campos para conservar su valor; `null` explícito devuelve 422 y el schema ya no lo anuncia como válido.
+- `User` incluye un UUID; `UserList` documenta paginación y total; `UserStatistics` documenta conteos por estado y rol.
+- Los errores 401, 404 y 409 reutilizan `ErrorResponse`; FastAPI conserva su schema de validación 422. `/health` es público y tiene su propio response model.
+
+Swagger muestra la sección de modelos. Alterna **Example Value** y **Schema** para consultar payloads y reglas. La referencia estática no envía requests; el `/docs` del servicio desplegado sí permite ejecutar con una API key autorizada.
+
+Regenera el contrato desde la raíz del proyecto:
+
+```bash
+poetry run python scripts/export_openapi.py
+```
+
+Fuentes: [ejemplos de schema en FastAPI](https://fastapi.tiangolo.com/tutorial/schema-extra-example/) y [SkipJsonSchema en Pydantic](https://docs.pydantic.dev/latest/api/json_schema/#pydantic.json_schema.SkipJsonSchema). Los tests verifican coherencia entre el schema de PATCH y el comportamiento real.

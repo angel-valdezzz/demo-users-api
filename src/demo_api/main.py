@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.security import APIKeyHeader
 
-from demo_api.models import Role, User, UserInput, UserList, UserPatch
+from demo_api.models import Role, User, UserInput, UserList, UserPatch, UserStatistics
 from demo_api.store import UserStore
 
 
@@ -36,13 +36,14 @@ def create_app(api_keys: dict[str, str] | None = None) -> FastAPI:
     ]
     app = FastAPI(
         title="Demo Users API",
-        version="0.1.0",
+        version="0.2.0",
         description=(
             "Business flows for automated API testing. Use Authorize with X-API-Key. "
             "Each key has isolated temporary data; restarts restore initial data. "
             "Use fictitious information only."
         ),
         swagger_ui_parameters={"defaultModelsExpandDepth": -1, "displayRequestDuration": True},
+        responses={401: {"description": "Missing or invalid API key"}},
     )
     store = UserStore()
     header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -77,6 +78,37 @@ def create_app(api_keys: dict[str, str] | None = None) -> FastAPI:
         user = store.create(owner, data)
         response.headers["Location"] = f"/users/{user.id}"
         return user
+
+    @app.get("/users/statistics", response_model=UserStatistics, tags=["Statistics"])
+    def user_statistics(owner: owner_dep):
+        """Counts by active state and role, isolated to the authenticated credential."""
+        return store.statistics(owner)
+
+    @app.post(
+        "/users/{user_id}/activate",
+        response_model=User,
+        tags=["User lifecycle"],
+        responses={
+            404: {"description": "User not found"},
+            409: {"description": "User already active"},
+        },
+    )
+    def activate_user(owner: owner_dep, user_id: UUID):
+        """Activate an inactive user. A repeated activation returns 409."""
+        return store.set_active(owner, user_id, True)
+
+    @app.post(
+        "/users/{user_id}/deactivate",
+        response_model=User,
+        tags=["User lifecycle"],
+        responses={
+            404: {"description": "User not found"},
+            409: {"description": "User already inactive"},
+        },
+    )
+    def deactivate_user(owner: owner_dep, user_id: UUID):
+        """Deactivate an active user. A repeated deactivation returns 409."""
+        return store.set_active(owner, user_id, False)
 
     @app.get("/users/{user_id}", response_model=User, tags=["Users"])
     def get_user(owner: owner_dep, user_id: UUID):
